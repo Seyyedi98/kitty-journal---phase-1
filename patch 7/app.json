@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Kitty Journal",
+    "slug": "kitty-journal",
+    "version": "0.2.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "scheme": "kittyjournal",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.kittyjournal.app" },
+    "android": { "package": "com.kittyjournal.app", "adaptiveIcon": { "backgroundColor": "#FBF8F0" }, "edgeToEdgeEnabled": true },
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-sqlite"]
+  }
+}
