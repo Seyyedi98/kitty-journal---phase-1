@@ -361,6 +361,51 @@ await step('Restore (B2a): restore card visible; cancel → no change; bad file 
   await waitForText('Recent entries');
 });
 
+await step('Restore (B2b): JSON merge adds missing entry, keeps existing; replace asks to confirm', async () => {
+  raw.exec("INSERT INTO entries (uuid,title,body,journal_date,favorite,pinned,created_at,updated_at) VALUES ('b2b0000000000000000000000000000a','restore me','text','2026-10-22',0,0,'2026-10-22T10:00:00.000Z','2026-10-22T10:00:00.000Z')");
+  await label('tab-settings').click();
+  await text('Backup & restore').click();
+  await waitForText('Restore from a file');
+  await text('Text export (.json)', { exact: true }).last().click();
+  await waitForText('text only');
+  const jsonUri = (await files()).filter((u) => u.includes('/backups/') && u.endsWith('.json')).pop();
+  await page.evaluate((u) => { window.__files.set('file:///cache/r.json', window.__files.get(u)); }, jsonUri);
+  raw.exec("DELETE FROM entries WHERE uuid='b2b0000000000000000000000000000a'");
+
+  const restoreBtn = () => page.locator('[role="button"]').filter({ hasText: 'Restore from a file' }).first();
+  await page.evaluate(() => { window.__nextPickResult = { name: 'r.json', uri: 'file:///cache/r.json' }; });
+  await restoreBtn().click();
+  await waitForText('Add to my journal');
+
+  // replace asks for confirmation and does nothing until confirmed
+  await text('Replace my journal', { exact: true }).last().click();
+  await wait(200);
+  assert.ok(await page.evaluate(() => window.__alerts[window.__alerts.length - 1].message.includes('Replace everything')), 'confirm shown');
+  assert.equal(one("SELECT COUNT(*) AS n FROM entries WHERE uuid='b2b0000000000000000000000000000a'").n, 0);
+
+  // merge
+  await text('Add to my journal', { exact: true }).last().click();
+  await waitForText('Restore finished');
+  assert.equal(one("SELECT COUNT(*) AS n FROM entries WHERE uuid='b2b0000000000000000000000000000a'").n, 1, 'entry restored');
+  assert.ok((await bodyText()).includes('1 entries added'), 'summary shows count');
+
+  // an entry that sits in the trash here comes back when the file has it active
+  raw.exec("UPDATE entries SET deleted_at='2026-10-28T10:00:00.000Z' WHERE uuid='b2b0000000000000000000000000000a'");
+  await text('Close').last().click();
+  await page.evaluate(() => { window.__nextPickResult = { name: 'r.json', uri: 'file:///cache/r.json' }; });
+  await restoreBtn().click();
+  await waitForText('Add to my journal');
+  await text('Add to my journal', { exact: true }).last().click();
+  await waitForText('Restore finished');
+  assert.equal(one("SELECT deleted_at AS d FROM entries WHERE uuid='b2b0000000000000000000000000000a'").d, null, 'trashed entry restored by merge');
+
+  assert.deepEqual(await errors(), []);
+  raw.exec("DELETE FROM entries WHERE uuid='b2b0000000000000000000000000000a'");
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await waitForText('Recent entries');
+});
+
 console.log('delete, undo, trash, purge');
 await step('delete → Undo restores; Alert is shown for confirmation', async () => {
   await label('tab-home').click();
@@ -653,6 +698,71 @@ await step('Insights mood distribution counts a mood picked in the editor; calen
   await label('tab-calendar').click();
   assert.equal(await page.locator('[aria-label="New entry"]').count(), 1, 'only the floating add button remains');
 });
+await step('Restore (B2b): replace makes a safety backup first and swaps the journal', async () => {
+  raw.exec("UPDATE entries SET created_at='2026-10-01T10:00:00.000Z' WHERE length(created_at)<20; UPDATE entries SET updated_at='2026-10-01T10:00:00.000Z' WHERE length(updated_at)<20");
+  raw.exec("INSERT OR IGNORE INTO entries (uuid,title,body,journal_date,favorite,pinned,created_at,updated_at) VALUES ('b2b0000000000000000000000000000a','restore me','text','2026-10-22',0,0,'2026-10-22T10:00:00.000Z','2026-10-22T10:00:00.000Z')");
+  await label('tab-settings').click();
+  await text('Backup & restore').click();
+  await waitForText('Restore from a file');
+  await text('Text export (.json)', { exact: true }).last().click();
+  await waitForText('text only');
+  const jsonUri = (await files()).filter((u) => u.includes('/backups/') && u.endsWith('.json')).pop();
+  await page.evaluate((u) => { window.__files.set('file:///cache/r.json', window.__files.get(u)); }, jsonUri);
+  const restoreBtn = () => page.locator('[role="button"]').filter({ hasText: 'Restore from a file' }).first();
+
+  // replace: after confirming, a safety backup exists and the journal equals the file
+  raw.exec("INSERT INTO entries (uuid,title,body,journal_date,favorite,pinned,created_at,updated_at) VALUES ('b2b0000000000000000000000000000b','local only','text','2026-10-23',0,0,'2026-10-23T10:00:00.000Z','2026-10-23T10:00:00.000Z')");
+  await page.evaluate(() => { window.__nextPickResult = { name: 'r.json', uri: 'file:///cache/r.json' }; });
+  await restoreBtn().click();
+  await waitForText('Replace my journal');
+  await text('Replace my journal', { exact: true }).last().click();
+  await wait(200);
+  await page.evaluate(() => window.__alerts[window.__alerts.length - 1].buttons.find((b) => b.style === 'destructive').onPress());
+  await waitFor(async () => (await bodyText()).includes('Safety backup saved'));
+  assert.ok((await files()).some((u) => u.includes('kitty-journal-safety') && u.endsWith('.zip')), 'safety backup written');
+  assert.equal(one("SELECT COUNT(*) AS n FROM entries WHERE uuid='b2b0000000000000000000000000000b'").n, 0, 'local-only entry replaced');
+  assert.equal(one("SELECT COUNT(*) AS n FROM entries WHERE uuid='b2b0000000000000000000000000000a'").n, 1, 'file entry present');
+  assert.deepEqual(await errors(), []);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await label('tab-home').click();
+  await waitForText('Recent entries');
+});
+
+console.log('B3: storage');
+await step('Storage (B3): usage shown; unused files cleaned; broken photo records found and removed; backup copies deleted', async () => {
+  await label('tab-settings').click();
+  await text('Storage', { exact: true }).first().click();
+  await waitForText('Free space on this device');
+  // an orphan file nothing references
+  await page.evaluate(() => window.__files.set('file:///docs/attachments/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg', 'QUJD'));
+  await page.locator('[role="button"]').filter({ hasText: 'Clean up unused files' }).first().click();
+  await waitForText('1 unused files removed');
+  assert.ok(!(await files()).some((u) => u.endsWith('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg')), 'orphan removed');
+  // a photo row whose file is gone
+  const entry = one('SELECT id FROM entries LIMIT 1');
+  raw.exec(`INSERT INTO attachments (uuid, entry_id, file_name, thumb_name, created_at) VALUES ('b3test0000000000000000000000000z', ${entry.id}, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_t.jpg', '2026-10-01T10:00:00.000Z')`);
+  await page.locator('[role="button"]').filter({ hasText: 'Check photo files' }).first().click();
+  await waitForText('1 photos have a missing file');
+  await text('Remove broken photo entries', { exact: true }).last().click();
+  await wait(200);
+  await page.evaluate(() => window.__alerts[window.__alerts.length - 1].buttons.find((b) => b.style === 'destructive').onPress());
+  await waitForText('All photo files are present');
+  assert.equal(one("SELECT COUNT(*) AS n FROM attachments WHERE file_name LIKE 'bbbb%'").n, 0, 'broken record removed');
+  // backup copies kept in the app
+  assert.ok((await files()).some((u) => u.includes('/backups/')), 'backup files exist before');
+  await page.locator('[role="button"]').filter({ hasText: 'Delete backup copies kept in the app' }).first().click();
+  await wait(200);
+  await page.evaluate(() => window.__alerts[window.__alerts.length - 1].buttons.find((b) => b.style === 'destructive').onPress());
+  await waitForText('backup files deleted');
+  assert.ok(!(await files()).some((u) => u.includes('/backups/')), 'backup files removed');
+  assert.deepEqual(await errors(), []);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await label('tab-home').click();
+  await waitForText('Recent entries');
+});
+
 await step('settings persist to the database and Persian switches layout/labels', async () => {
   await label('tab-settings').click();
   await text('فارسی').click();
@@ -682,6 +792,7 @@ await step('Persian RTL: dock order/pill and text alignment', async () => {
   const aligns = await page.evaluate(() => [...document.querySelectorAll('span')].filter((e) => /[\u0600-\u06FF]/.test(e.textContent)).map((e) => getComputedStyle(e).textAlign));
   assert.ok(aligns.length > 3 && aligns.every((a) => a === 'right' || a === 'center'), 'persian text aligned right: ' + [...new Set(aligns)]);
 });
+
 
 await browser.close();
 console.log(`\n[browser] ${passed} passed, ${failures.length} failed`);

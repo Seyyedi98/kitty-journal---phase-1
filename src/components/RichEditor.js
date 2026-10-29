@@ -9,7 +9,7 @@ import { sanitizeHtml } from '../utils/richText';
  * `onChange(sanitisedHtml)` on every edit, never on load.
  */
 const RichEditor = forwardRef(function RichEditor(
-  { html, colors, rtl, placeholder, minHeight = 220, onChange, onState, onCaret, onFocusChange },
+  { html, colors, rtl, placeholder, minHeight = 220, onChange, onState, onCaret, onFocusChange, onDrag, onDragEnd, onTouchStart },
   ref,
 ) {
   const web = useRef(null);
@@ -41,6 +41,9 @@ const RichEditor = forwardRef(function RichEditor(
     else if (m.t === 'height') setHeight(Math.max(minHeight, Math.min(m.h, 20000)));
     else if (m.t === 'caret') onCaret?.(m.y);
     else if (m.t === 'focus') onFocusChange?.(Boolean(m.v));
+    else if (m.t === 'drag') onDrag?.(m.dy);
+    else if (m.t === 'dragend') onDragEnd?.(m.v);
+    else if (m.t === 'tstart') onTouchStart?.();
   };
 
   return (

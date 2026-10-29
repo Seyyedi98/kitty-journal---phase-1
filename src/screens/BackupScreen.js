@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Archive, Download, FileText, FolderOpen, Share2 } from 'lucide-react-native';
+import { Alert, Modal, StyleSheet, View } from 'react-native';
+import { Archive, Download, FileText, FolderOpen, GitMerge, RefreshCw, Share2 } from 'lucide-react-native';
 import { ScrollView, Text } from '../ui';
 import { Animated, fadeInDown } from '../motion';
 import { Button, Card, Note, SubHeader } from '../components/common';
 import { loadSettings, saveSetting } from '../db/repository';
-import { BackupError, createZipBackup, parseBackup, saveJsonExport } from '../services/backup';
+import { BackupError, applyRestore, createZipBackup, parseBackup, saveJsonExport } from '../services/backup';
 import { deps } from '../platform/deps';
 import { pickBackupFile } from '../platform/backupPicker';
 import { shareFile } from '../platform/share';
@@ -32,7 +32,7 @@ function parseErrorMsg(code, t) {
 const OVERDUE_DAYS = 30;
 
 /** Backup & restore. B1: export. B2a: pick + preview. B2b: apply. */
-export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack, runExternal = (fn) => fn() }) {
+export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack, onChanged, runExternal = (fn) => fn() }) {
   const num = useMemo(() => numberFormatter(language), [language]);
   const [lastBackupAt, setLastBackupAt] = useState(null);
   const [busy, setBusy] = useState(null); // 'zip' | 'json' | 'restore' | null
@@ -43,6 +43,7 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
   // B2a restore preview
   const [parsed, setParsed] = useState(null);   // result of parseBackup
   const [restoreError, setRestoreError] = useState('');
+  const [summary, setSummary] = useState(null); // B2b: result of applyRestore
 
   useEffect(() => {
     let cancelled = false;
@@ -141,12 +142,45 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
     }
   }, [busy, db, t, runExternal]);
 
+  // ── B2b: apply the restore ─────────────────────────────────────────────────
+  const runApply = useCallback(async (mode) => {
+    if (busy || !parsed) return;
+    setBusy('apply');
+    setRestoreError('');
+    setSummary(null);
+    try {
+      const out = await applyRestore(db, deps, parsed, mode);
+      setSummary(out);
+      setParsed(null);
+      if (onChanged) await onChanged();
+    } catch (e) {
+      console.warn('[kitty-journal] restore failed:', e);
+      setRestoreError(e instanceof BackupError && e.code === 'safety-backup-failed' ? t.errSafety : t.restoreFailed);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, parsed, db, t, onChanged]);
+
+  const confirmReplace = useCallback(() => {
+    Alert.alert(t.restoreReplace, t.restoreReplaceConfirm, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.restoreReplace, style: 'destructive', onPress: () => runApply('replace') },
+    ]);
+  }, [t, runApply]);
+
+  const popupOpen = Boolean(error || restoreError || (parsed && parsed.preview) || summary || result);
+  const closePopup = () => {
+    if (busy) return;
+    setError(''); setRestoreError(''); setParsed(null); setSummary(null); setResult(null); setShareMessage('');
+  };
+
   const daysSince = lastBackupAt ? Math.floor((now - new Date(lastBackupAt).getTime()) / 86400000) : null;
   const overdue = daysSince != null && daysSince >= OVERDUE_DAYS;
   const align = rtl ? 'right' : 'left';
   const lastDate = lastBackupAt ? formatDateKey(isoToDateKey(lastBackupAt), language, calendar, { dateStyle: 'medium' }) : '';
 
   return (
+    <>
     <ScrollView contentContainerStyle={s.page}>
       <SubHeader title={t.backup} onBack={onBack} c={c} rtl={rtl} t={t} />
       <Note c={c} rtl={rtl}>{t.backupIntro}</Note>
@@ -193,8 +227,6 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
         </Card>
       </Animated.View>
 
-      {error ? <Note c={c} rtl={rtl} tone="danger">{error}</Note> : null}
-
       {/* ── B2a: Restore card ───────────────────────────────────────────── */}
       <Animated.View entering={fadeInDown(210)}>
         <Card title={t.restoreFromFile} c={c} rtl={rtl}>
@@ -210,7 +242,15 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
         </Card>
       </Animated.View>
 
+    </ScrollView>
+
+      <Modal visible={popupOpen} transparent animationType="fade" onRequestClose={closePopup}>
+        <View style={s.backdrop}>
+          <View style={[s.sheet, { backgroundColor: c.paper, borderColor: c.line }]}>
+            <ScrollView contentContainerStyle={s.sheetBody} keyboardShouldPersistTaps="handled">
+      {error ? <Note c={c} rtl={rtl} tone="danger">{error}</Note> : null}
       {restoreError ? <Note c={c} rtl={rtl} tone="danger">{restoreError}</Note> : null}
+      {(error || restoreError) && !(parsed && parsed.preview) && !summary && !result ? <Button label={t.close} onPress={closePopup} c={c} rtl={rtl} variant="secondary" /> : null}
 
       {parsed && parsed.preview ? (
         <Animated.View entering={fadeInDown(0)}>
@@ -219,8 +259,32 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
             warnings={parsed.warnings || []}
             t={t} c={c} rtl={rtl} num={num}
             language={language} calendar={calendar}
-            onDismiss={() => { setParsed(null); setRestoreError(''); }}
+            onDismiss={closePopup}
+            onMerge={() => runApply('merge')}
+            onReplace={confirmReplace}
+            busy={busy === 'apply'}
           />
+        </Animated.View>
+      ) : null}
+
+      {summary ? (
+        <Animated.View entering={fadeInDown(0)}>
+          <Card title={t.restoreDone} c={c} rtl={rtl}>
+            <Text style={{ color: c.ink, fontSize: 12, textAlign: align }}>{'• '}{fmt(t.restoreAdded, { n: num(summary.entriesAdded + (summary.entriesUntrashed || 0)) })}</Text>
+            {summary.duplicatesKept > 0 ? (
+              <Text style={{ color: c.ink, fontSize: 12, textAlign: align }}>{'• '}{fmt(t.restoreKept, { n: num(summary.duplicatesKept) })}</Text>
+            ) : null}
+            {summary.photosAdded > 0 ? (
+              <Text style={{ color: c.ink, fontSize: 12, textAlign: align }}>{'• '}{fmt(t.restorePhotosAdded, { n: num(summary.photosAdded) })}</Text>
+            ) : null}
+            {summary.photosSkipped && summary.photosSkipped.length ? (
+              <Note c={c} rtl={rtl} tone="danger">{fmt(t.restorePhotosSkipped, { n: num(summary.photosSkipped.length) })}</Note>
+            ) : null}
+            {summary.safetyBackup ? (
+              <Text selectable style={{ color: c.muted, fontSize: 11, textAlign: align }}>{fmt(t.restoreSafety, { name: summary.safetyBackup.name })}</Text>
+            ) : null}
+            <Button label={t.close} onPress={closePopup} c={c} rtl={rtl} variant="secondary" />
+          </Card>
         </Animated.View>
       ) : null}
 
@@ -240,15 +304,20 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
             <Button label={t.shareBackup} onPress={share} c={c} rtl={rtl} variant="secondary" icon={Share2} />
             <Note c={c} rtl={rtl}>{t.backupShareNote}</Note>
             {shareMessage ? <Note c={c} rtl={rtl} tone={shareMessage === t.savedToDevice ? undefined : 'danger'}>{shareMessage}</Note> : null}
+            <Button label={t.close} onPress={closePopup} c={c} rtl={rtl} variant="secondary" />
           </Card>
         </Animated.View>
       ) : null}
-    </ScrollView>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
 // ── Read-only preview card (B2a) ────────────────────────────────────────────
-function RestorePreview({ preview, warnings, t, c, rtl, num, language, calendar, onDismiss }) {
+function RestorePreview({ preview, warnings, t, c, rtl, num, language, calendar, onDismiss, onMerge, onReplace, busy }) {
   const align = rtl ? 'right' : 'left';
   const createdDate = preview.createdAt
     ? formatDateKey(isoToDateKey(preview.createdAt), language, calendar, { dateStyle: 'medium' })
@@ -285,12 +354,19 @@ function RestorePreview({ preview, warnings, t, c, rtl, num, language, calendar,
       {warnMsgs.map((m, i) => (
         <Note key={i} c={c} rtl={rtl}>{m}</Note>
       ))}
-      <Button label={t.close} onPress={onDismiss} c={c} rtl={rtl} variant="secondary" />
+      <Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, textAlign: align }}>{t.restoreMergeHint}</Text>
+      <Button label={busy ? t.restoreWorking : t.restoreMerge} onPress={onMerge} c={c} rtl={rtl} variant="primary" icon={GitMerge} busy={busy} disabled={busy} />
+      <Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, textAlign: align }}>{t.restoreReplaceHint}</Text>
+      <Button label={t.restoreReplace} onPress={onReplace} c={c} rtl={rtl} icon={RefreshCw} disabled={busy} />
+      <Button label={t.close} onPress={onDismiss} c={c} rtl={rtl} variant="secondary" disabled={busy} />
     </Card>
   );
 }
 
 const s = StyleSheet.create({
   page: { paddingTop: 22, paddingBottom: 40, gap: 14 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 18 },
+  sheet: { width: '100%', maxWidth: 520, alignSelf: 'center', borderWidth: 1, borderRadius: 20, maxHeight: '85%', overflow: 'hidden' },
+  sheetBody: { padding: 14, gap: 12 },
   status: { borderWidth: 1, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 },
 });

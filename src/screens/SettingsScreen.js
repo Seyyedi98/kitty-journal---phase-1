@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Archive, ChevronLeft, ChevronRight, Heart, Tag, Trash2 } from 'lucide-react-native';
+import { Archive, ChevronLeft, ChevronRight, Heart, HardDrive, Tag, Trash2 } from 'lucide-react-native';
 import { ScrollView, Text } from '../ui';
 import { Card, LinkRow, Segmented } from '../components/common';
 import { fmt } from '../i18n';
@@ -75,6 +75,7 @@ export default function SettingsScreen({
 
       <Card title={t.settingsData} c={c} rtl={rtl} style={{ gap: 0 }}>
         <LinkRow icon={Archive} title={t.backup} onPress={() => onOpen('backup')} trailing={chevron} c={c} rtl={rtl} />
+        <LinkRow icon={HardDrive} title={t.storage} onPress={() => onOpen('storage')} trailing={chevron} c={c} rtl={rtl} />
         <LinkRow
           icon={Trash2}
           title={t.trash}

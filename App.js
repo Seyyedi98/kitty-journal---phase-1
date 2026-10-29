@@ -98,6 +98,7 @@ import TrashScreen from "./src/screens/TrashScreen";
 import TagsScreen from "./src/screens/TagsScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import BackupScreen from "./src/screens/BackupScreen";
+import StorageScreen from "./src/screens/StorageScreen";
 import { numberFormatter } from "./src/utils/format";
 import { EMOTIONS } from "./src/utils/emotions";
 
@@ -164,7 +165,7 @@ function AppShell() {
     getCalendarParts(dateKey(), "gregorian"),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [subScreen, setSubScreen] = useState(null); // null | "trash" | "tags" | "backup"
+  const [subScreen, setSubScreen] = useState(null); // null | "trash" | "tags" | "backup" | "storage"
   const [trashCount, setTrashCount] = useState(0);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -320,11 +321,11 @@ function AppShell() {
   useEffect(() => () => clearTimeout(undoTimer.current), []);
   // The undo bar would cover the buttons of Trash / Tags; the Trash screen has its own Restore.
   useEffect(() => {
-    if (subScreen) {
+    if (subScreen || settingsOpen) {
       clearTimeout(undoTimer.current);
       setUndo(null);
     }
-  }, [subScreen]);
+  }, [subScreen, settingsOpen]);
 
   const changeLanguage = (value) => {
     setLanguage(value);
@@ -508,6 +509,19 @@ function AppShell() {
         language={language}
         calendar={effectiveCalendar}
         onBack={() => setSubScreen(null)}
+        onChanged={refresh}
+      />
+    );
+  else if (settingsOpen && subScreen === "storage")
+    content = (
+      <StorageScreen
+        db={db}
+        t={t}
+        c={c}
+        rtl={rtl}
+        language={language}
+        onBack={() => setSubScreen(null)}
+        onChanged={refresh}
       />
     );
   else if (settingsOpen && subScreen === "tags")

@@ -554,12 +554,16 @@ export async function parseBackup(db, deps, source) {
     }
 
     // Compare with what is on this device.
-    const localEntries = await db.getAllAsync('SELECT uuid, updated_at FROM entries');
+    const localEntries = await db.getAllAsync('SELECT uuid, updated_at, deleted_at FROM entries');
     const localByUuid = new Map(localEntries.map((r) => [r.uuid, r.updated_at]));
+    const localTrashed = new Set(localEntries.filter((r) => r.deleted_at).map((r) => r.uuid));
     let identical = 0;
     let differing = 0;
+    let fromTrash = 0;
     for (const e of result.data.entries) {
       if (!localByUuid.has(e.uuid)) continue;
+      // In the trash here, active in the file: merge brings it back, so it is not a duplicate.
+      if (localTrashed.has(e.uuid) && !e.deleted_at) { fromTrash += 1; continue; }
       if (localByUuid.get(e.uuid) === e.updated_at) identical += 1;
       else differing += 1;
     }
@@ -577,6 +581,7 @@ export async function parseBackup(db, deps, source) {
       trashedEntries: result.data.entries.filter((e) => e.deleted_at).length,
       missingPhotos: result.kind === 'json' ? counts.attachments : missing.length,
       newEntries: result.data.entries.length - identical - differing,
+      fromTrash,
       duplicatesIdentical: identical,
       duplicatesDifferent: differing,
       moodConflicts,
@@ -691,6 +696,7 @@ export async function applyRestore(db, deps, parsed, mode) {
   const summary = {
     mode,
     entriesAdded: 0,
+    entriesUntrashed: 0,
     duplicatesKept: 0,
     conflictsKeptLocal: 0,
     moodsAdded: 0,
@@ -707,6 +713,7 @@ export async function applyRestore(db, deps, parsed, mode) {
     let oldFiles = new Set();
     let toInsert = data.entries;
     let localByUuid = new Map();
+    const untrash = [];
 
     if (mode === 'replace') {
       // Fail closed: no safety copy, no replace.
@@ -720,11 +727,17 @@ export async function applyRestore(db, deps, parsed, mode) {
       await pruneSafetyBackups(fs, safety.name);
       oldFiles = await listReferencedFiles(db);
     } else {
-      const rows = await db.getAllAsync('SELECT uuid, updated_at FROM entries');
+      const rows = await db.getAllAsync('SELECT uuid, updated_at, deleted_at FROM entries');
       localByUuid = new Map(rows.map((r) => [r.uuid, r.updated_at]));
+      const localTrashed = new Set(rows.filter((r) => r.deleted_at).map((r) => r.uuid));
       toInsert = [];
       for (const e of data.entries) {
         if (localByUuid.has(e.uuid)) {
+          // In the trash here but active in the file: bring it back (see below).
+          if (localTrashed.has(e.uuid) && !e.deleted_at) {
+            untrash.push(e.uuid);
+            continue;
+          }
           summary.duplicatesKept += 1;
           if (localByUuid.get(e.uuid) !== e.updated_at) summary.conflictsKeptLocal += 1;
         } else {
@@ -771,6 +784,10 @@ export async function applyRestore(db, deps, parsed, mode) {
             summary.moodConflictsKeptLocal += 1;
           }
         }
+      }
+      for (const uuid of untrash) {
+        await db.runAsync('UPDATE entries SET deleted_at = NULL, updated_at = ? WHERE uuid = ?', nowIso(), uuid);
+        summary.entriesUntrashed += 1;
       }
       for (const e of toInsert) {
         await insertEntryDeep(db, e, staged);

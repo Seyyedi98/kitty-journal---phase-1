@@ -87,7 +87,7 @@ export const phase2 = {
     storageChecking: 'Checking…', storageAllGood: 'All photo files are present.',
     storageMissing: '{n} photos have a missing file.', storageRemoveBroken: 'Remove broken photo entries',
     storageRemoveBrokenConfirm: 'Remove the records of photos whose files are missing? Entries stay.',
-    storageClean: 'Clean up unused files', storageCleaned: '{n} unused files removed', storageBusy: 'Busy right now, try again in a moment.',
+    storageClean: 'Clean up unused files', storageCleaned: '{n} unused files removed', storageBusy: 'Busy right now, try again in a moment.', storageFree: 'Free space on this device: {size}', storageBackups: '{n} backup files kept in the app · {size}', storageNoBackups: 'No backup files are kept in the app.', storageClearBackups: 'Delete backup copies kept in the app', storageClearBackupsConfirm: 'Delete the backup files stored inside the app, including the safety copy made before a replace? Copies you saved or shared elsewhere are not touched, and your entries stay.', storageBackupsCleared: '{n} backup files deleted',
 
     // reminders
     reminders: 'Writing reminder', remindersHint: 'A gentle nudge on the days you choose. Missed days are never mentioned.',
@@ -211,7 +211,7 @@ export const phase2 = {
     storageChecking: 'در حال بررسی…', storageAllGood: 'همهٔ فایل عکس‌ها موجودند.',
     storageMissing: 'فایل {n} عکس پیدا نشد.', storageRemoveBroken: 'حذف رکوردهای خراب عکس',
     storageRemoveBrokenConfirm: 'رکورد عکس‌هایی که فایلشان نیست حذف شود؟ یادداشت‌ها می‌مانند.',
-    storageClean: 'پاک‌سازی فایل‌های بلااستفاده', storageCleaned: '{n} فایل بلااستفاده پاک شد', storageBusy: 'الان مشغول است، کمی بعد دوباره امتحان کن.',
+    storageClean: 'پاک‌سازی فایل‌های بلااستفاده', storageCleaned: '{n} فایل بلااستفاده پاک شد', storageBusy: 'الان مشغول است، کمی بعد دوباره امتحان کن.', storageFree: 'فضای خالی این دستگاه: {size}', storageBackups: '{n} فایل پشتیبان داخل برنامه · {size}', storageNoBackups: 'فایل پشتیبانی داخل برنامه نگه داشته نشده.', storageClearBackups: 'حذف نسخه‌های پشتیبانِ داخل برنامه', storageClearBackupsConfirm: 'فایل‌های پشتیبانِ داخل برنامه، از جمله نسخهٔ ایمنیِ قبل از جایگزینی، حذف شوند؟ نسخه‌هایی که جای دیگر ذخیره یا ارسال کرده‌ای دست نمی‌خورند و یادداشت‌هایت می‌مانند.', storageBackupsCleared: '{n} فایل پشتیبان حذف شد',
 
     reminders: 'یادآور نوشتن', remindersHint: 'یک یادآوری ملایم در روزهایی که انتخاب می‌کنی. روزهای ننوشته هرگز یادآوری نمی‌شوند.',
     reminderEnable: 'برای نوشتن یادآوری کن', reminderTime: 'ساعت', reminderDays: 'روزها',
@@ -330,7 +330,7 @@ export const phase2 = {
     storageChecking: 'Denetleniyor…', storageAllGood: 'Tüm fotoğraf dosyaları yerinde.',
     storageMissing: '{n} fotoğrafın dosyası eksik.', storageRemoveBroken: 'Bozuk fotoğraf kayıtlarını kaldır',
     storageRemoveBrokenConfirm: 'Dosyası eksik fotoğrafların kayıtları kaldırılsın mı? Kayıtlar kalır.',
-    storageClean: 'Kullanılmayan dosyaları temizle', storageCleaned: '{n} kullanılmayan dosya silindi', storageBusy: 'Şu an meşgul, birazdan tekrar dene.',
+    storageClean: 'Kullanılmayan dosyaları temizle', storageCleaned: '{n} kullanılmayan dosya silindi', storageBusy: 'Şu an meşgul, birazdan tekrar dene.', storageFree: 'Bu cihazdaki boş alan: {size}', storageBackups: 'Uygulamada saklanan {n} yedek dosyası · {size}', storageNoBackups: 'Uygulamada saklanan yedek dosyası yok.', storageClearBackups: 'Uygulamada saklanan yedekleri sil', storageClearBackupsConfirm: 'Uygulamanın içinde saklanan yedek dosyaları, değiştirmeden önce alınan güvenlik kopyası dahil, silinsin mi? Başka yere kaydettiğin veya paylaştığın kopyalara dokunulmaz, kayıtların kalır.', storageBackupsCleared: '{n} yedek dosyası silindi',
 
     reminders: 'Yazma hatırlatıcısı', remindersHint: 'Seçtiğin günlerde nazik bir hatırlatma. Kaçırılan günlerden asla söz edilmez.',
     reminderEnable: 'Bana yazmayı hatırlat', reminderTime: 'Saat', reminderDays: 'Günler',

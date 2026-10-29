@@ -19,9 +19,9 @@ export function buildEditorHtml({ html = '', rtl = false, placeholder = '', minH
 <html dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
-html,body{margin:0;padding:0;background:transparent;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:transparent;-webkit-tap-highlight-color:transparent;overflow:hidden;overscroll-behavior:none;touch-action:none}
 body{position:relative;color:${c.ink};font-family:system-ui,-apple-system,Roboto,'Noto Sans','Noto Naskh Arabic','Noto Sans Arabic',sans-serif;font-size:${fontSize}px;line-height:1.75}
-#ed{outline:none;min-height:${minHeight}px;padding:12px 0 24px;word-wrap:break-word;overflow-wrap:anywhere;caret-color:${c.accent};-webkit-user-select:text;user-select:text}
+#ed{touch-action:none;outline:none;min-height:${minHeight}px;padding:12px 0 24px;word-wrap:break-word;overflow-wrap:anywhere;caret-color:${c.accent};-webkit-user-select:text;user-select:text}
 #ed ::selection,#ed::selection{background:${c.selection}}
 #ph{position:absolute;top:12px;inset-inline-start:0;color:${c.muted};pointer-events:none;display:none}
 p,div,h1,h2,h3,li,blockquote,ul,ol{unicode-bidi:plaintext;text-align:start}
@@ -346,6 +346,30 @@ ed.addEventListener('paste',function(e){
 ed.addEventListener('drop',function(e){e.preventDefault();});
 document.addEventListener('selectionchange',function(){saveSel();report();});
 if(window.ResizeObserver){new ResizeObserver(height).observe(ed);}
+/* The WebView is exactly as tall as the text, so the page itself must never scroll:
+   an inner scroll would swallow vertical drags that belong to the outer screen. */
+function pin(){if(window.scrollX||window.scrollY)window.scrollTo(0,0);if(document.documentElement.scrollTop)document.documentElement.scrollTop=0;if(document.body.scrollTop)document.body.scrollTop=0;}
+window.addEventListener('scroll',pin,{passive:true});document.addEventListener('scroll',pin,{passive:true});
+
+/* Vertical drags anywhere on the text scroll the OUTER screen. The page cannot scroll itself, and a
+   WebView swallows touches that start on it, so the drag is measured here (in screen coordinates,
+   which do not shift while the outer screen moves) and forwarded to the app, with a fling at the end. */
+var dragY=0,dragT=0,dragV=0,dragging=false,startY=0,multi=false;
+document.addEventListener('touchstart',function(e){
+  multi=e.touches.length>1;if(multi)return;
+  var t=e.touches[0];startY=dragY=t.screenY;dragT=Date.now();dragV=0;dragging=false;post({t:'tstart'});
+},{passive:true});
+document.addEventListener('touchmove',function(e){
+  if(multi||e.touches.length!==1)return;
+  var sel=getSelection();if(sel&&!sel.isCollapsed&&inEd())return;
+  var t=e.touches[0];
+  if(!dragging){if(Math.abs(t.screenY-startY)<8)return;dragging=true;}
+  var dy=dragY-t.screenY,now=Date.now(),dt=Math.max(1,now-dragT);
+  dragV=0.75*dragV+0.25*(dy/dt);dragY=t.screenY;dragT=now;
+  if(dy)post({t:'drag',dy:dy});
+},{passive:true});
+function endDrag(){if(dragging){post({t:'dragend',v:Date.now()-dragT>120?0:dragV});}dragging=false;}
+document.addEventListener('touchend',endDrag,{passive:true});document.addEventListener('touchcancel',endDrag,{passive:true});
 
 ed.innerHTML=INIT;normalize();updatePh();
 hist=[{h:ed.innerHTML,s:null}];hpos=0;

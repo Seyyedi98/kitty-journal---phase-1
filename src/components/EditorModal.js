@@ -132,6 +132,36 @@ export default function EditorModal({
   const richRef = useRef(null);
   const scrollRef = useRef(null);
   const scrollY = useRef(0);
+  const scrollMax = useRef(Infinity);
+  const scrollLayoutH = useRef(0);
+  const scrollContentH = useRef(0);
+  const flingRaf = useRef(null);
+
+  // Drags that start on the editor text are forwarded here by the editor page.
+  const stopFling = useCallback(() => {
+    if (flingRaf.current != null) { cancelAnimationFrame(flingRaf.current); flingRaf.current = null; }
+  }, []);
+  const scrollByDelta = useCallback((dy) => {
+    const sv = scrollRef.current;
+    if (!sv || !sv.scrollTo || !dy) return false;
+    const target = Math.max(0, Math.min(scrollMax.current, scrollY.current + dy));
+    if (target === scrollY.current) return false;
+    scrollY.current = target;
+    sv.scrollTo({ y: target, animated: false });
+    return true;
+  }, []);
+  const flingFrom = useCallback((v) => {
+    stopFling();
+    let vel = Math.max(-4, Math.min(4, v || 0)); // px per ms
+    if (Math.abs(vel) < 0.15) return;
+    const step = () => {
+      vel *= 0.95;
+      if (Math.abs(vel) < 0.03 || !scrollByDelta(vel * 16)) { flingRaf.current = null; return; }
+      flingRaf.current = requestAnimationFrame(step);
+    };
+    flingRaf.current = requestAnimationFrame(step);
+  }, [scrollByDelta, stopFling]);
+  useEffect(() => stopFling, [stopFling]);
   const editorWrap = useRef(null);
   const entryIdRef = useRef(null);
   const createdHere = useRef(false);
@@ -540,6 +570,8 @@ export default function EditorModal({
             ref={scrollRef}
             onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
             scrollEventThrottle={32}
+            onContentSizeChange={(_w, h) => { scrollMax.current = Math.max(0, h - (scrollLayoutH.current || 0)); scrollContentH.current = h; }}
+            onLayout={(e) => { scrollLayoutH.current = e.nativeEvent.layout.height; scrollMax.current = Math.max(0, scrollContentH.current - scrollLayoutH.current); }}
             keyboardShouldPersistTaps="always"
             contentContainerStyle={s.content}
           >
@@ -588,6 +620,9 @@ export default function EditorModal({
                     onChange={onBodyChange}
                     onState={setFmtState}
                     onCaret={keepCaretVisible}
+                    onTouchStart={stopFling}
+                    onDrag={scrollByDelta}
+                    onDragEnd={flingFrom}
                   />
                 ) : null}
               </View>
