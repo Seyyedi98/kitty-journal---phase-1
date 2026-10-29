@@ -19,6 +19,7 @@ const exact = {
   'expo-location': stub('expo-location.js'),
   'react-native-webview': stub('webview.jsx'),
   'expo-sharing': stub('expo-sharing.js'),
+  'expo-document-picker': stub('expo-document-picker.js'),
 };
 const virtual = {
   'lucide-react-native': `import { iconProxy } from ${JSON.stringify(stub('misc.jsx'))}; module.exports = iconProxy;`,

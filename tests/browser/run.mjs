@@ -331,6 +331,36 @@ await step('Backup (B1): ZIP + JSON export, share sheet, last-backup status', as
   await waitForText('Recent entries');
 });
 
+console.log('B2a: restore preview');
+await step('Restore (B2a): restore card visible; cancel → no change; bad file → error', async () => {
+  await label('tab-settings').click();
+  await text('Backup & restore').click();
+  await waitForText('Restore from a file');
+
+  const restoreBtn = () => page.locator('[role="button"]').filter({ hasText: 'Restore from a file' }).first();
+
+  // ── 1. cancel the picker → no preview ─────────────────────────────────
+  await restoreBtn().click();
+  await wait(700);
+  assert.ok(!(await bodyText()).includes('What is in this file'), 'cancelled pick: no preview');
+
+  // ── 2. pick a non-backup file → error ─────────────────────────────────
+  // Store as plain text (stub ignores encoding, returns stored value as-is).
+  // parseBackup sees text='hello world' → corrupt-json → shows errCorrupt.
+  await page.evaluate(() => {
+    window.__files.set('file:///cache/notabackup.txt', 'hello world');
+    window.__nextPickResult = { name: 'notabackup.txt', uri: 'file:///cache/notabackup.txt' };
+  });
+  await restoreBtn().click();
+  // errCorrupt: 'This file is damaged and cannot be read.'
+  await waitForText('damaged and cannot be read');
+
+  assert.deepEqual(await errors(), []);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await page.evaluate(() => window.__pressBack()); await wait(250);
+  await waitForText('Recent entries');
+});
+
 console.log('delete, undo, trash, purge');
 await step('delete → Undo restores; Alert is shown for confirmation', async () => {
   await label('tab-home').click();

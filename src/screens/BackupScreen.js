@@ -1,29 +1,48 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Archive, Download, FileText, Share2 } from 'lucide-react-native';
+import { Archive, Download, FileText, FolderOpen, Share2 } from 'lucide-react-native';
 import { ScrollView, Text } from '../ui';
 import { Animated, fadeInDown } from '../motion';
 import { Button, Card, Note, SubHeader } from '../components/common';
 import { loadSettings, saveSetting } from '../db/repository';
-import { BackupError, createZipBackup, saveJsonExport } from '../services/backup';
+import { BackupError, createZipBackup, parseBackup, saveJsonExport } from '../services/backup';
 import { deps } from '../platform/deps';
+import { pickBackupFile } from '../platform/backupPicker';
 import { shareFile } from '../platform/share';
 import { canSaveToDevice, saveFileToDevice } from '../platform/saveToDevice';
 import { formatDateKey } from '../calendar';
 import { formatBytes, isoToDateKey, numberFormatter } from '../utils/format';
 import { fmt } from '../i18n';
 
+/** Map a parse error code to an i18n string. */
+function parseErrorMsg(code, t) {
+  switch (code) {
+    case 'not-a-backup':      return t.errNotBackup;
+    case 'bad-structure':     return t.errStructure;
+    case 'unsupported-version':
+    case 'newer-schema':      return t.errNewer;
+    case 'corrupt-zip':
+    case 'corrupt-json':      return t.errCorrupt;
+    case 'unsafe-path':       return t.errUnsafe;
+    case 'manifest-mismatch': return t.errStructure;
+    default:                  return t.errGeneric;
+  }
+}
+
 const OVERDUE_DAYS = 30;
 
-/** Backup & restore. Step B1: exporting (the restore card arrives in step B2). */
+/** Backup & restore. B1: export. B2a: pick + preview. B2b: apply. */
 export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack, runExternal = (fn) => fn() }) {
   const num = useMemo(() => numberFormatter(language), [language]);
   const [lastBackupAt, setLastBackupAt] = useState(null);
-  const [busy, setBusy] = useState(null); // 'zip' | 'json' | null
+  const [busy, setBusy] = useState(null); // 'zip' | 'json' | 'restore' | null
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [shareMessage, setShareMessage] = useState('');
   const [now] = useState(() => Date.now());
+  // B2a restore preview
+  const [parsed, setParsed] = useState(null);   // result of parseBackup
+  const [restoreError, setRestoreError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +117,30 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
     }
   };
 
+  // ── B2a: pick a file and show a read-only preview ──────────────────────────
+  const pickAndPreview = useCallback(async () => {
+    if (busy) return;
+    setBusy('restore');
+    setRestoreError('');
+    setParsed(null);
+    try {
+      const source = await runExternal(() => pickBackupFile());
+      if (!source) { setBusy(null); return; }          // user cancelled
+      const result = await parseBackup(db, deps, source);
+      if (!result.ok) {
+        const code = result.errors && result.errors.length ? result.errors[0].code : 'parse-failed';
+        setRestoreError(parseErrorMsg(code, t));
+      } else {
+        setParsed(result);
+      }
+    } catch (e) {
+      console.warn('[kitty-journal] restore pick failed:', e);
+      setRestoreError(t.errGeneric);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, db, t, runExternal]);
+
   const daysSince = lastBackupAt ? Math.floor((now - new Date(lastBackupAt).getTime()) / 86400000) : null;
   const overdue = daysSince != null && daysSince >= OVERDUE_DAYS;
   const align = rtl ? 'right' : 'left';
@@ -152,6 +195,35 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
 
       {error ? <Note c={c} rtl={rtl} tone="danger">{error}</Note> : null}
 
+      {/* ── B2a: Restore card ───────────────────────────────────────────── */}
+      <Animated.View entering={fadeInDown(210)}>
+        <Card title={t.restoreFromFile} c={c} rtl={rtl}>
+          <Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, textAlign: align }}>{t.restoreHint}</Text>
+          <Button
+            label={busy === 'restore' ? t.restoreWorking : t.restoreFromFile}
+            onPress={pickAndPreview}
+            c={c} rtl={rtl}
+            icon={FolderOpen}
+            busy={busy === 'restore'}
+            disabled={Boolean(busy)}
+          />
+        </Card>
+      </Animated.View>
+
+      {restoreError ? <Note c={c} rtl={rtl} tone="danger">{restoreError}</Note> : null}
+
+      {parsed && parsed.preview ? (
+        <Animated.View entering={fadeInDown(0)}>
+          <RestorePreview
+            preview={parsed.preview}
+            warnings={parsed.warnings || []}
+            t={t} c={c} rtl={rtl} num={num}
+            language={language} calendar={calendar}
+            onDismiss={() => { setParsed(null); setRestoreError(''); }}
+          />
+        </Animated.View>
+      ) : null}
+
       {result ? (
         <Animated.View entering={fadeInDown(0)}>
           <Card title={t.backupReady} c={c} rtl={rtl}>
@@ -172,6 +244,49 @@ export default function BackupScreen({ db, t, c, rtl, language, calendar, onBack
         </Animated.View>
       ) : null}
     </ScrollView>
+  );
+}
+
+// ── Read-only preview card (B2a) ────────────────────────────────────────────
+function RestorePreview({ preview, warnings, t, c, rtl, num, language, calendar, onDismiss }) {
+  const align = rtl ? 'right' : 'left';
+  const createdDate = preview.createdAt
+    ? formatDateKey(isoToDateKey(preview.createdAt), language, calendar, { dateStyle: 'medium' })
+    : '';
+
+  const rows = [
+    preview.counts?.entries != null  && { label: fmt(t.restoreNew, { n: num(preview.newEntries ?? preview.counts.entries) }) },
+    preview.counts?.entries != null  && preview.duplicatesIdentical != null && { label: fmt(t.restoreDuplicates, { n: num(preview.duplicatesIdentical) }) },
+    preview.duplicatesDifferent != null && preview.duplicatesDifferent > 0 && { label: fmt(t.restoreDifferent, { n: num(preview.duplicatesDifferent) }) },
+    preview.missingPhotos != null && preview.missingPhotos > 0 && { label: fmt(t.restorePhotos, { n: num(preview.missingPhotos) }) },
+    preview.moodConflicts != null && { label: fmt(t.restoreMoods, { n: num(preview.moodConflicts ?? 0) }) },
+    preview.local?.entries != null   && { label: fmt(t.restoreLocal, { n: num(preview.local.entries) }) },
+  ].filter(Boolean);
+
+  const warnMsgs = (warnings || []).map((w) => {
+    switch (w.code) {
+      case 'unexpected-entry':  return t.warnUnexpected;
+      case 'json-no-photos':    return t.backupTextOnly;
+      case 'missing-photos':    return t.warnUnexpected;
+      default:                  return null;
+    }
+  }).filter(Boolean);
+
+  return (
+    <Card title={t.restorePreviewTitle} c={c} rtl={rtl}>
+      {createdDate ? (
+        <Text style={{ color: c.muted, fontSize: 11, textAlign: align }}>{fmt(t.restoreCreated, { date: createdDate })}</Text>
+      ) : null}
+      <View style={{ gap: 4, marginTop: 6 }}>
+        {rows.map((r, i) => (
+          <Text key={i} style={{ color: c.ink, fontSize: 12, textAlign: align }}>{'• '}{r.label}</Text>
+        ))}
+      </View>
+      {warnMsgs.map((m, i) => (
+        <Note key={i} c={c} rtl={rtl}>{m}</Note>
+      ))}
+      <Button label={t.close} onPress={onDismiss} c={c} rtl={rtl} variant="secondary" />
+    </Card>
   );
 }
 
